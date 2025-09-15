@@ -1,0 +1,5 @@
+{
+  "name": "KeyGuard v1.0.1.0",
+  "description": "A web application to manage license keys for various applications. Administrators can log in to create, read, update, and delete keys, defining their validity period and associated user information.",
+  "requestFramePermissions": []
+}
