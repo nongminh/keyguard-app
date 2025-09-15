@@ -1,249 +1,124 @@
 import type { User, Key, Application } from '../types';
-import { SUPER_ADMIN_EMAIL } from '../constants';
 
-// --- MOCK DATABASE HELPERS (using localStorage) ---
-
-const MOCK_LATENCY = 300; // ms
-
-const simulateApiCall = <T>(data: T): Promise<T> => {
-    return new Promise(resolve => {
-        setTimeout(() => resolve(data), MOCK_LATENCY);
-    });
-};
-
-const getFromStorage = <T>(key: string, defaultValue: T): T => {
-    try {
-        const stored = localStorage.getItem(key);
-        return stored ? JSON.parse(stored) : defaultValue;
-    } catch (e) {
-        console.error(`Failed to parse ${key} from localStorage`, e);
-        return defaultValue;
-    }
-};
-
-const saveToStorage = <T>(key: string, data: T) => {
-    localStorage.setItem(key, JSON.stringify(data));
-};
-
-
-// Initialize seed data if not present
-const initializeData = () => {
-    // Users
-    if (!localStorage.getItem('users')) {
-        saveToStorage<User[]>('users', [{
-            id: `user-superadmin`,
-            email: SUPER_ADMIN_EMAIL,
-            name: 'Super Admin',
-            role: 'superadmin',
-            password: 'password123'
-        }]);
-    }
-    // Applications
-    if (!localStorage.getItem('applications')) {
-        saveToStorage<Application[]>('applications', [
-            { id: 'app-1', name: 'PhotoEditor Pro' },
-            { id: 'app-2', name: 'DataAnalyzer Ultimate' },
-            { id: 'app-3', name: 'CodeCompanion AI' },
-        ]);
-    }
-    // Keys
-    if (!localStorage.getItem('licenseKeys')) {
-         const today = new Date();
-        const oneMonthFromNow = new Date(new Date().setMonth(today.getMonth() + 1));
-        const oneMonthAgo = new Date(new Date().setMonth(today.getMonth() - 1));
-        const twoMonthsAgo = new Date(new Date().setMonth(today.getMonth() - 2));
-        saveToStorage<Key[]>('licenseKeys', [
-            { id: '1', keyValue: 'KG-DEMO-ACTIVE-123', applicationId: 'app-1', userName: 'Alice Johnson', userContact: 'alice@example.com', startDate: new Date().toISOString().split('T')[0], endDate: oneMonthFromNow.toISOString().split('T')[0], isActive: true },
-            { id: '2', keyValue: 'KG-DEMO-EXPIRED-456', applicationId: 'app-2', userName: 'Bob Williams', userContact: '123-456-7890', startDate: twoMonthsAgo.toISOString().split('T')[0], endDate: oneMonthAgo.toISOString().split('T')[0], isActive: true },
-        ]);
-    }
-};
-
-initializeData();
+const API_ENDPOINT = '/.netlify/functions/data';
 
 // --- API FUNCTIONS ---
 
+// A helper to handle fetch requests and errors
+async function apiFetch<T>(resource: string, options: RequestInit = {}): Promise<T> {
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    try {
+        const response = await fetch(`${API_ENDPOINT}?resource=${resource}`, { ...options, headers });
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'An API error occurred');
+        }
+        if (response.status === 204) { // No Content
+            return null as T;
+        }
+        return response.json();
+    } catch (error) {
+        console.error(`API Fetch Error (${resource}):`, error);
+        throw error;
+    }
+}
+
+
 // USER API
 export const api = {
-    async login(email: string, password: string): Promise<User | null> {
-        const users = getFromStorage<User[]>('users', []);
-        const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    // Session management is now simplified as we don't store the user object in localStorage for long.
+    // In a real-world app, you'd use JWTs (JSON Web Tokens) for this.
+    // For now, we'll keep a simple in-memory cache for the current user.
+    _currentUser: null as User | null,
 
-        if (user && user.password === password) {
-            // Never send the password back to the client
-            const { password, ...userWithoutPassword } = user;
-            return simulateApiCall(userWithoutPassword as User);
+    async login(email: string, password: string): Promise<User | null> {
+        const user = await apiFetch<User>('login', {
+            method: 'POST',
+            body: JSON.stringify({ email, password }),
+        });
+        if (user) {
+            this._currentUser = user;
         }
-        
-        return simulateApiCall(null);
+        return user;
     },
 
     async getCurrentUser(): Promise<User | null> {
-        const user = getFromStorage<User | null>('currentUser', null);
-        return simulateApiCall(user);
+        // This simulates checking a session. In a real app, this would validate a token.
+        return Promise.resolve(this._currentUser);
     },
     
     async setCurrentUser(user: User | null): Promise<void> {
-        saveToStorage('currentUser', user);
-        await simulateApiCall(undefined);
+       this._currentUser = user;
+       return Promise.resolve();
     },
 
     async getUsers(): Promise<User[]> {
-        const users = getFromStorage<User[]>('users', []);
-        return simulateApiCall(users.map(u => {
-            const { password, ...userWithoutPassword } = u;
-            return userWithoutPassword as User;
-        }));
+        return apiFetch<User[]>('users', { method: 'GET' });
     },
 
     async saveUser(userData: Pick<User, 'name' | 'email' | 'permissions' | 'password'>, id: string | null): Promise<User> {
-        let users = getFromStorage<User[]>('users', []);
-        if (id) { // Edit
-            let updatedUser: User | undefined;
-            users = users.map(u => {
-                if (u.id === id) {
-                    updatedUser = { ...u, name: userData.name, permissions: userData.permissions };
-                    return updatedUser;
-                }
-                return u;
-            });
-            saveToStorage('users', users);
-            if (!updatedUser) throw new Error("User not found");
-             const { password, ...userToReturn } = updatedUser;
-            return simulateApiCall(userToReturn as User);
-
-        } else { // Create
-            if (users.some(u => u.email.toLowerCase() === userData.email.toLowerCase())) {
-                throw new Error("A user with this email already exists.");
-            }
-            const newUser: User = { 
-                id: `user-${Date.now()}`, 
-                role: 'admin', 
-                email: userData.email,
-                name: userData.name,
-                password: userData.password,
-                permissions: userData.permissions || {},
-            };
-            users.unshift(newUser);
-            saveToStorage('users', users);
-            const { password, ...userToReturn } = newUser;
-            return simulateApiCall(userToReturn as User);
-        }
+         return apiFetch<User>('users', {
+            method: id ? 'PUT' : 'POST',
+            body: JSON.stringify({ ...userData, id }),
+        });
     },
     
     async deleteUser(userId: string): Promise<void> {
-        let users = getFromStorage<User[]>('users', []);
-        users = users.filter(u => u.id !== userId);
-        saveToStorage('users', users);
-        await simulateApiCall(undefined);
+        await apiFetch('users', {
+            method: 'DELETE',
+            body: JSON.stringify({ id: userId }),
+        });
     },
     
     async resetPassword(userId: string): Promise<void> {
-        let users = getFromStorage<User[]>('users', []);
-        const defaultPassword = 'keyguard123';
-        let found = false;
-        users = users.map(u => {
-            if (u.id === userId) {
-                found = true;
-                return { ...u, password: defaultPassword };
-            }
-            return u;
+        await apiFetch('resetPassword', {
+            method: 'POST',
+            body: JSON.stringify({ id: userId }),
         });
-
-        if (!found) throw new Error("User not found to reset password.");
-
-        saveToStorage('users', users);
-        await simulateApiCall(undefined);
     },
-
 
     // KEY API
     async getKeys(): Promise<Key[]> {
-        const keys = getFromStorage<Key[]>('licenseKeys', []);
-        keys.sort((a,b) => parseInt(b.id.split('-')[1] || '0') - parseInt(a.id.split('-')[1] || '0'));
-        return simulateApiCall(keys);
+        return apiFetch<Key[]>('keys', { method: 'GET' });
     },
 
     async saveKey(keyData: Omit<Key, 'id'>, id: string | null): Promise<Key> {
-        let keys = getFromStorage<Key[]>('licenseKeys', []);
-        if (id) { // Edit
-            let updatedKey: Key | undefined;
-            keys = keys.map(k => {
-                if (k.id === id) {
-                    updatedKey = { id, ...keyData };
-                    return updatedKey;
-                }
-                return k;
-            });
-            saveToStorage('licenseKeys', keys);
-            if (!updatedKey) throw new Error("Key not found");
-            return simulateApiCall(updatedKey);
-        } else { // Create
-            const newKey: Key = { id: `key-${Date.now()}`, ...keyData };
-            keys.unshift(newKey);
-            saveToStorage('licenseKeys', keys);
-            return simulateApiCall(newKey);
-        }
+        return apiFetch<Key>('keys', {
+            method: id ? 'PUT' : 'POST',
+            body: JSON.stringify({ ...keyData, id }),
+        });
     },
 
     async deleteKey(keyId: string): Promise<void> {
-        let keys = getFromStorage<Key[]>('licenseKeys', []);
-        keys = keys.filter(k => k.id !== keyId);
-        saveToStorage('licenseKeys', keys);
-        await simulateApiCall(undefined);
+        await apiFetch('keys', {
+            method: 'DELETE',
+            body: JSON.stringify({ id: keyId }),
+        });
     },
 
     async toggleKeyStatus(keyId: string): Promise<Key> {
-        let keys = getFromStorage<Key[]>('licenseKeys', []);
-        let updatedKey: Key | undefined;
-        keys = keys.map(k => {
-            if (k.id === keyId) {
-                updatedKey = { ...k, isActive: !k.isActive };
-                return updatedKey;
-            }
-            return k;
+         return apiFetch<Key>('toggleKeyStatus', {
+            method: 'POST',
+            body: JSON.stringify({ id: keyId }),
         });
-        saveToStorage('licenseKeys', keys);
-        if (!updatedKey) throw new Error("Key not found");
-        return simulateApiCall(updatedKey);
     },
 
     // APPLICATION API
     async getApplications(): Promise<Application[]> {
-        return simulateApiCall(getFromStorage<Application[]>('applications', []));
+        return apiFetch<Application[]>('applications', { method: 'GET' });
     },
     
     async saveApplication(appData: Omit<Application, 'id'>, id: string | null): Promise<Application> {
-         let apps = getFromStorage<Application[]>('applications', []);
-        if (id) { // Edit
-            let updatedApp: Application | undefined;
-            apps = apps.map(a => {
-                if (a.id === id) {
-                    updatedApp = { id, ...appData };
-                    return updatedApp;
-                }
-                return a;
-            });
-            saveToStorage('applications', apps);
-            if (!updatedApp) throw new Error("Application not found");
-            return simulateApiCall(updatedApp);
-        } else { // Create
-            const newApp: Application = { id: `app-${Date.now()}`, ...appData };
-            apps.push(newApp);
-            saveToStorage('applications', apps);
-            return simulateApiCall(newApp);
-        }
+         return apiFetch<Application>('applications', {
+            method: id ? 'PUT' : 'POST',
+            body: JSON.stringify({ ...appData, id }),
+        });
     },
 
     async deleteApplication(appId: string): Promise<void> {
-        let apps = getFromStorage<Application[]>('applications', []);
-        // Check for dependencies before deleting
-        const keys = getFromStorage<Key[]>('licenseKeys', []);
-        if(keys.some(key => key.applicationId === appId)) {
-            throw new Error("Cannot delete: application is in use by one or more keys.");
-        }
-        apps = apps.filter(a => a.id !== appId);
-        saveToStorage('applications', apps);
-        await simulateApiCall(undefined);
+        await apiFetch('applications', {
+            method: 'DELETE',
+            body: JSON.stringify({ id: appId }),
+        });
     }
 };

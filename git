@@ -1,0 +1,7 @@
+$ git status
+
+$ git add .
+
+$ git commit -m "feat: Add Netlify function for backend API"
+
+$ git push

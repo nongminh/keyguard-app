@@ -1,9 +1,11 @@
-import { Pool } from 'pg';
+import { Pool } from '@neondatabase/serverless';
 import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 import { SUPER_ADMIN_EMAIL } from '../../constants';
 
 
-// Initialize the connection pool
+// Initialize the connection pool.
+// When using the Netlify-Neon integration, Netlify automatically provides the DATABASE_URL.
+// The @neondatabase/serverless driver is optimized for this serverless environment.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
@@ -155,7 +157,21 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
             return createResponse(404, { message: `Resource or method not found for key: ${handlerKey}` });
         }
     } catch (error) {
-        console.error("Handler Error:", error);
-        return createResponse(500, { message: (error as Error).message || 'An internal server error occurred.' });
+        const err = error as Error & { code?: string };
+        console.error("Detailed Handler Error:", err); // Log the full error object for server-side debugging
+
+        let clientMessage = 'An internal server error occurred. Check the function logs on Netlify for more details.';
+
+        // Check for common PG connection error codes or messages.
+        if (err.message.includes('timeout') || (err.code && ['ENOTFOUND', 'ECONNREFUSED'].includes(err.code))) {
+            clientMessage = 'Database connection timed out. This is often due to a firewall or IP whitelist issue. Please ensure your database allows connections from all IPs (0.0.0.0/0).';
+        } else if (err.code === '28P01') {
+            clientMessage = 'Database authentication failed. Please double-check your DATABASE_URL environment variable provided by the Neon integration.';
+        } else {
+            // Use the original error message if it's not a generic one
+            clientMessage = err.message || clientMessage;
+        }
+
+        return createResponse(500, { message: clientMessage });
     }
 };
