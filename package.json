@@ -11,7 +11,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@neondatabase/serverless": "^4.20240611.0",
+    "@neondatabase/serverless": "^0.9.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-toastify": "^10.0.5"
