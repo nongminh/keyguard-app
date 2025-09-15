@@ -1,0 +1,8 @@
+# Cấu hình cho Netlify Functions
+[functions]
+  # Cấu hình cụ thể cho hàm 'data'
+  [functions.data]
+    # Chỉ dẫn cho trình build không gói thư viện 'pg' vào file hàm.
+    # Netlify sẽ cài đặt nó riêng biệt trên môi trường server.
+    # Điều này là bắt buộc cho các thư viện có native bindings như 'pg'.
+    external_node_modules = ["pg"]
